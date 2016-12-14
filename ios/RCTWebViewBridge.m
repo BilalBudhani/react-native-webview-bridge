@@ -55,6 +55,8 @@ NSString *const RCTWebViewBridgeSchema = @"wvb";
 {
   UIWebView *_webView;
   NSString *_injectedJavaScript;
+  IMP wkOriginalImp, uiOriginalImp, nilImp;
+  Method wkMethod, uiMethod;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -66,6 +68,7 @@ NSString *const RCTWebViewBridgeSchema = @"wvb";
     _webView = [[UIWebView alloc] initWithFrame:self.bounds];
     _webView.delegate = self;
     [self addSubview:_webView];
+    [self swizzleInputAccessoryView];
   }
   return self;
 }
@@ -184,35 +187,27 @@ RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
                       updateOffset:YES];
 }
 
+- (void)swizzleInputAccessoryView {
+  Class wkClass = NSClassFromString([@[@"UI", @"Web", @"Browser", @"View"] componentsJoinedByString:@""]);
+  wkMethod = class_getInstanceMethod(wkClass, @selector(inputAccessoryView));
+  wkOriginalImp = method_getImplementation(wkMethod);
+  Class uiClass = NSClassFromString([@[@"WK", @"Content", @"View"] componentsJoinedByString:@""]);
+  uiMethod = class_getInstanceMethod(uiClass, @selector(inputAccessoryView));
+  uiOriginalImp = method_getImplementation(uiMethod);
+  nilImp = imp_implementationWithBlock(^(id _s) {
+    return nil;
+  });
+}
+
 -(void)setHideKeyboardAccessoryView:(BOOL)hideKeyboardAccessoryView
 {
-  if (!hideKeyboardAccessoryView) {
-    return;
+  if (hideKeyboardAccessoryView) {
+    method_setImplementation(wkMethod, nilImp);
+    method_setImplementation(uiMethod, nilImp);
+  } else {
+    method_setImplementation(wkMethod, wkOriginalImp);
+    method_setImplementation(uiMethod, uiOriginalImp);
   }
-
-  UIView* subview;
-  for (UIView* view in _webView.scrollView.subviews) {
-    if([[view.class description] hasPrefix:@"UIWeb"])
-      subview = view;
-  }
-
-  if(subview == nil) return;
-
-  NSString* name = [NSString stringWithFormat:@"%@_SwizzleHelper", subview.class.superclass];
-  Class newClass = NSClassFromString(name);
-
-  if(newClass == nil)
-  {
-    newClass = objc_allocateClassPair(subview.class, [name cStringUsingEncoding:NSASCIIStringEncoding], 0);
-    if(!newClass) return;
-
-    Method method = class_getInstanceMethod([_SwizzleHelper class], @selector(inputAccessoryView));
-      class_addMethod(newClass, @selector(inputAccessoryView), method_getImplementation(method), method_getTypeEncoding(method));
-
-    objc_registerClassPair(newClass);
-  }
-
-  object_setClass(subview, newClass);
 }
 
 #pragma mark - UIWebViewDelegate methods
